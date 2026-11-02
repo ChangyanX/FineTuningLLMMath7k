@@ -204,8 +204,17 @@ sbatch source-v1/scripts/tc2/job.sbatch baseline M1 1 main AQuA
 # tail -f runs/M1_baseline_main/eval/AQuA/evaluate_50173.log
 # sacct -j 50173 --format=JobID,JobName,State,ExitCode,Elapsed
 sbatch source-v1/scripts/tc2/job.sbatch baseline M1 1 main AddSub
+# Submitted batch job 50174
+# tail -f runs/M1_baseline_main/eval/AddSub/evaluate_50174.log
+# sacct -j 50174 --format=JobID,JobName,State,ExitCode,Elapsed
 sbatch source-v1/scripts/tc2/job.sbatch baseline M3 1 main AQuA
+# Submitted batch job 50375
+# tail -f runs/M3_baseline_main/eval/AQuA/evaluate_50375.log
+# sacct -j 50375 --format=JobID,JobName,State,ExitCode,Elapsed
 sbatch source-v1/scripts/tc2/job.sbatch baseline M3 1 main AddSub
+# Submitted batch job 50377
+# tail -f runs/M3_baseline_main/eval/AddSub/evaluate_50377.log
+# sacct -j 50377 --format=JobID,JobName,State,ExitCode,Elapsed
 ```
 
 For the optional 2-epoch comparison, repeat the twelve mandatory commands with epochs `2` instead of `1` (paths become `M1_e2_main`, etc.). This adds 4 training + 8 evaluations. It trains from the pinned base, not from the 1-epoch final adapter. Keep the tag/epoch pair consistent between training and evaluation.
