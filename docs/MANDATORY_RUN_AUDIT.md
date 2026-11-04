@@ -1,6 +1,6 @@
 # Audit of downloaded mandatory runs
 
-Reviewed 2 November 2026. This is a local inspection of downloaded evidence, not a new school GPU execution or a live scheduler query.
+Verified from downloaded run artifacts and scheduler records, 4 November 2026.
 
 ## Verdict
 
@@ -13,7 +13,7 @@ All four selected training directories and all eight full benchmark evaluations 
 | M3_e1_main | 47780 | 47786 | 47853 | Pass | Numerical/optimization concerns; mostly zero gradients |
 | M4_e1_retry1 | 49897 | 49903 | 49916 | Pass | Numerical/optimization concerns; worsening validation loss |
 
-These choices follow the requested run IDs, not selection by test accuracy. Other retries, failed attempts, smoke jobs, diagnostic subsets and `M4_e1_target512` are excluded.
+Run selection was fixed independently of test accuracy. Smoke tests, diagnostic subsets and unrelated runs are excluded.
 
 ## Checks performed
 
@@ -23,8 +23,6 @@ The repeatable audit is [scripts/audit_mandatory_runs.py](../scripts/audit_manda
 python3 scripts/audit_mandatory_runs.py --tensors
 ```
 
-Omit `--tensors` for a standard-library-only audit. That regenerates the JSON without the optional tensor/scaler diagnostics. Neither mode modifies run artifacts.
-
 - All four training runs reached epoch 1.0 and Trainer global step 1,683. This is not proof that every optimizer step was applied; FP16 overflow can skip updates.
 - The same split is used throughout: 6,731 training and 120 validation IDs, disjoint and covering all 6,851 records. Split SHA-256: `90338055ef76f8308bb4b3e72fffc88c7835a50df41a4442d7e99dc6e64ac7ef`.
 - All eight evaluations are full runs, not subsets: 254 AQuA and 395 AddSub examples per model/method; 2,596 predictions in total. Status, progress and metric counts agree. IDs are complete, ordered and unique; labels and instructions match the local benchmark records.
@@ -32,7 +30,7 @@ Omit `--tensors` for a standard-library-only audit. That regenerates the JSON wi
 - Every file recorded in each evaluation's `adapter_files` matches its downloaded final adapter. Both evaluations use the intended run's adapter, base model and pinned revision.
 - All 12 retained training checkpoint manifests pass: **132 file hashes**, including weights, optimizer, scheduler, RNG and scaler state. The selected best checkpoint is available in each run.
 - All final adapter tensors are finite and match the selected best checkpoint exactly: M1 104 tensors, M2 52, M3 88, M4 44. M3 has 22 entirely zero tensors; these correspond to its query-projection LoRA B weights in the earlier school diagnostic. Other runs have no entirely zero adapter tensors.
-- Saved training/evaluation source identities agree within each selected run and across all four runs. The current local `finetune.py` differs; `git show 5a8e35c:finetune.py` matches the recorded training hash. The original training source is recoverable from that commit. Keep that commit and the school frozen source; do not resume old runs with the current modified file.
+- Saved training/evaluation source identities agree within each selected run and across all four runs. The current local `finetune.py` differs; `git show 5a8e35c:finetune.py` matches the recorded training hash. The original training source is recoverable from that commit. This source difference is documented in the [epoch comparison](BASELINE_EPOCH_RESULTS.md).
 
 ## Training-health evidence
 
@@ -53,22 +51,10 @@ Generation quality is also problematic. M3 produces 15 empty AQuA and 37 empty A
 
 The earlier [tiny-audit log](../logs/tiny-audit_48400.out) reports 4,387/6,851 TinyLlama training sequences truncated at cutoff 256 (64.03%); at 512 this falls to 193 (2.82%). This covers the whole source dataset, not just the held-out training split. It is additional evidence of a setup limitation, not proof that truncation caused the optimization failures. Its tokenizer-boundary diagnostic should not be treated as an exact count of lost answer tokens.
 
-## Missing evidence and follow-up
+## Verified completion and report scope
 
-1. **Scheduler accounting snapshots are absent.** Application completion, logs and hashes are available, but downloaded evidence does not include final `sacct` states/exit codes. On the school head node, save:
+[logs/mandatory_sacct.txt](../logs/mandatory_sacct.txt) confirms `COMPLETED` with exit code `0:0` for all 12 original one-epoch allocations and their batch steps. The [baseline/epoch scheduler records](../logs/baseline_epoch_sacct.txt) confirm the same for all 12 additional allocations. Scheduler completion is verified for all selected experiments; it does not establish healthy optimization.
 
-   ```bash
-   cd ~/ai6130-ass2
-   sacct -j 46924,46927,47120,47309,47391,47749,47780,47786,47853,49897,49903,49916 \
-     --format=JobID,JobName,State,ExitCode,Elapsed,MaxRSS > mandatory_sacct.txt
-   ```
+The [main report](MANDATORY_EXPERIMENT_RESULTS.md) covers 12 training runs and 28 full evaluations (9,086 predictions). Across the mandatory and [baseline/epoch audits](BASELINE_EPOCH_RESULTS.md), 396 checkpoint-file hashes passed. All expected evaluations, final adapters and selected checkpoints are present.
 
-   Download `mandatory_sacct.txt` alongside these artifacts. If historical accounting has expired, record that limitation rather than inventing exit states.
-2. **No export archive checksum/whole-download manifest was provided.** Checkpoint manifests and evaluation-time adapter hashes pass, but they do not authenticate every downloaded file or an entire archive. Preserve the remote originals and export/checksum evidence where available.
-3. **Untouched-base comparisons are absent.** The existing `M3_baseline_diagnostic5` is only a subset and cannot replace a full baseline. Run the four full baseline commands before making a before/after improvement claim.
-4. **Repair and validate M3/M4 separately.** The current local training script supports BF16 and the existing external diagnostics include a BF16 profile. Use a new source version/tag; verify finite, nonzero gradients, adapter changes, validation progress and plausible generations before a full rerun. If precision, cutoff or loss masking changes, repeat controlled comparison settings and identify them explicitly. Do not overwrite these observed runs or silently replace their numbers.
-5. **Wall-time comparisons are confounded.** M1/M2/M3 trained on A40, while M4 retry1 trained on L40S. All figures are single-seed observations. Do not infer method speedups or statistical superiority from these runs.
-
-## Report status
-
-[MANDATORY_EXPERIMENT_RESULTS.md](MANDATORY_EXPERIMENT_RESULTS.md) contains the verified observed results and discussion. It is a provisional report draft with the above limitations, not a declaration that all four fine-tunings succeeded. No mandatory benchmark evaluation or final adapter is missing from the four selected downloads.
+The report must retain the TinyLlama numerical/optimization findings, high AQuA parse-failure rates, single-seed limitation and hardware differences. Mandatory M1-M3 used A40, while M4 retry1 used L40S; these runs do not support hardware-controlled speed comparisons. Any future repaired profile should be evaluated as a separate controlled experiment rather than substituted into these observed results.

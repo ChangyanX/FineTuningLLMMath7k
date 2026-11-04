@@ -193,6 +193,8 @@ Do **not** paste the entire block as an unattended pipeline: plain `sbatch` retu
 
 Untouched-base baselines (4 evaluations shared by both adapters):
 
+**Results checked 4 November 2026:** both full baseline models are downloaded and verified on AQuA/AddSub. See [baseline and epoch results](BASELINE_EPOCH_RESULTS.md). The job IDs below are historical records; do not resubmit completed baselines.
+
 **Account limit: at most two jobs total (running + queued), with only one running at a time. Do not paste all four commands together.** Submit only when `squeue -u "$USER"` shows a free slot. If the queue is empty, you may submit the first two, then wait for both to finish successfully before the next pair. Dependent jobs count toward the same limit. The IDs below record earlier submissions; do not rerun completed evaluations. Resume an interrupted baseline with `sbatch --export=ALL,RESUME=1 ... baseline ...` using its original source/settings.
 
 These baselines support Task 3's before/after discussion; they are additional comparisons, not an explicitly listed Task 4 option.
@@ -278,6 +280,8 @@ This is two allocations for four evaluations. To resume previously started basel
 
 #### Option 1: more epochs
 
+**Results checked 4 November 2026:** all eight two-/three-epoch runs and their 16 evaluations are downloaded and verified. See [the results and health audit](BASELINE_EPOCH_RESULTS.md). More epochs did not resolve M3/M4 training problems. Commands and job IDs below are retained as experiment provenance, not instructions to rerun completed paths.
+
 Each command combines one training run and two evaluations. Two epochs: **4 jobs**, submitted in two pairs.
 
 ```bash
@@ -340,7 +344,6 @@ sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M3 3 epochs
 # sacct -j 50655 --format=JobID,JobName,State,ExitCode,Elapsed
 sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M4 3 epochs
 # Submitted batch job 50743
-# Submitted batch job 50743
 # tail -n 100 runs/M4_e3_epochs/train_50743.log
 # tail -f runs/M4_e3_epochs/eval/AQuA/evaluate_50743.log
 # tail -f runs/M4_e3_epochs/eval/AddSub/evaluate_50743.log
@@ -357,28 +360,51 @@ Merge training and **AQuA only**; keep the larger SVAMP evaluation separate. Thi
 
 ```bash
 sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M1 1 math10k AQuA math_10k
+# Submitted batch job 50862
+# tail -n 100 runs/M1_e1_math10k/train_50862.log
+# tail -f runs/M1_e1_math10k/eval/AQuA/evaluate_50862.log
+# sacct -j 50862 --format=JobID,JobName,State,ExitCode,Elapsed
 sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M2 1 math10k AQuA math_10k
+# Submitted batch job 50863
+# tail -n 100 runs/M2_e1_math10k/train_50863.log
+# tail -f runs/M2_e1_math10k/eval/AQuA/evaluate_50863.log
+# sacct -j 50863 --format=JobID,JobName,State,ExitCode,Elapsed
 ```
 
 Wait for both, then:
 
 ```bash
 sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M3 1 math10k AQuA math_10k
-sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M4 1 math10k AQuA math_10k
+# Submitted batch job 50887
+# tail -n 100 runs/M3_e1_math10k/train_50887.log
+# tail -f runs/M3_e1_math10k/eval/AQuA/evaluate_50887.log
+# sacct -j 50887 --format=JobID,JobName,State,ExitCode,Elapsed
+
+sbatch --job-name=M4-math10k source-options-v1/scripts/tc2/job.sbatch train-eval M4 1 math10k AQuA math_10k
+# Submitted batch job 50947
+# tail -n 100 runs/M4_e1_math10k/train_50947.log
+# tail -f runs/M4_e1_math10k/eval/AQuA/evaluate_50947.log
+# sacct -j 50947 --format=JobID,JobName,State,ExitCode,Elapsed
 ```
 
 Wait for both, then:
 
 ```bash
 sbatch source-options-v1/scripts/tc2/job.sbatch eval M1 1 math10k SVAMP math_10k
+# Submitted batch job 50948
+# Submitted batch job 50975
+# tail -f runs/M1_e1_math10k/eval/SVAMP/evaluate_50975.log
+# sacct -j 50975 --format=JobID,JobName,State,ExitCode,Elapsed
 sbatch source-options-v1/scripts/tc2/job.sbatch eval M2 1 math10k SVAMP math_10k
+# tail -f runs/M2_e1_math10k/eval/SVAMP/evaluate_50975.log
+# sacct -j 50975 --format=JobID,JobName,State,ExitCode,Elapsed
 ```
 
 Wait for both, then:
 
 ```bash
-sbatch source-options-v1/scripts/tc2/job.sbatch eval M3 1 math10k SVAMP math_10k
-sbatch source-options-v1/scripts/tc2/job.sbatch eval M4 1 math10k SVAMP math_10k
+sbatch --job-name=M3-math10k source-options-v1/scripts/tc2/job.sbatch eval M3 1 math10k SVAMP math_10k
+sbatch --job-name=M4-math10k source-options-v1/scripts/tc2/job.sbatch eval M4 1 math10k SVAMP math_10k
 ```
 
 For a dataset comparison, evaluate the original `math_7k` adapters on SVAMP too (Option 4).

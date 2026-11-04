@@ -14,9 +14,13 @@ for metrics in sorted(root.glob('*/eval/*/metrics.json')):
         continue
     settings = json.loads((metrics.parent / 'settings.json').read_text())
     records = [json.loads(line) for line in (metrics.parent / 'predictions.jsonl').read_text().splitlines()]
-    expected = {'AQuA': 254, 'AddSub': 395}[settings['dataset']]
+    test_path = Path(__file__).resolve().parents[1] / 'dataset' / settings['dataset'] / 'test.json'
+    test = json.loads(test_path.read_text())
+    expected = len(test)
     assert len(records) == expected == data['total']
     assert [r['id'] for r in records] == list(range(expected))
+    assert all(r['label'] == t['answer'] and r['instruction'] == t['instruction']
+               for r, t in zip(records, test)), 'Predictions do not match benchmark records'
     assert all(extract_answer(r['output_pred'], settings['dataset'], settings['scoring']) == r['prediction']
                for r in records), 'Saved parsed answers do not match raw generations'
     count = sum(correct(r['prediction'], r['label'], settings['dataset']) for r in records)

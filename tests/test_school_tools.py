@@ -62,11 +62,33 @@ class SchoolToolsTests(unittest.TestCase):
                         lora_weights='adapter', dataset='AQuA', scoring='strict'))
             atomic_json(result/'metrics.json', dict(complete=True, subset=False, total=254,
                         correct=254, generation_seconds=10))
-            for index in range(254):
-                append_json(result/'predictions.jsonl', dict(id=index, prediction='A', label='A', output_pred='The answer is A.'))
+            test = json.loads((ROOT/'dataset/AQuA/test.json').read_text())
+            for index, item in enumerate(test):
+                append_json(result/'predictions.jsonl', dict(id=index, instruction=item['instruction'],
+                    prediction=item['answer'], label=item['answer'], output_pred=f"The answer is {item['answer']}."))
             command = [sys.executable, str(ROOT/'scripts/summarize.py'), str(root/'runs'), str(root/'results.csv')]
             subprocess.run(command, check=True, capture_output=True)
             with (root/'results.csv').open() as f:
                 self.assertEqual(next(csv.DictReader(f))['accuracy_percent'], '100.0')
             append_json(result/'predictions.jsonl', dict(id=0, prediction='A', label='A'))
+            self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
+
+    def test_summary_supports_svamp_and_rejects_wrong_labels(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            result = root/'runs/M1_e1_test/eval/SVAMP'
+            result.mkdir(parents=True)
+            test = json.loads((ROOT/'dataset/SVAMP/test.json').read_text())
+            atomic_json(result/'settings.json', dict(base_model='test', adapter='LoRA',
+                        lora_weights='adapter', dataset='SVAMP', scoring='strict'))
+            atomic_json(result/'metrics.json', dict(complete=True, subset=False, total=len(test),
+                        correct=len(test), generation_seconds=10))
+            records = [dict(id=i, instruction=t['instruction'], label=t['answer'],
+                prediction=float(t['answer']), output_pred=f"The answer is {t['answer']}.") for i, t in enumerate(test)]
+            path = result/'predictions.jsonl'
+            path.write_text(''.join(json.dumps(r)+'\n' for r in records))
+            command = [sys.executable, str(ROOT/'scripts/summarize.py'), str(root/'runs'), str(root/'results.csv')]
+            subprocess.run(command, check=True, capture_output=True)
+            records[0]['label'] = 'wrong'
+            path.write_text(''.join(json.dumps(r)+'\n' for r in records))
             self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)

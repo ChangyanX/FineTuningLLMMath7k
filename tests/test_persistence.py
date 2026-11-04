@@ -11,6 +11,16 @@ from scoring import extract_answer, correct
 
 
 class PersistenceTests(unittest.TestCase):
+    def test_nonfinite_metrics_are_preserved_as_strings(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'metrics.jsonl'
+            append_json(path, {'step': 180, 'loss': 0.8,
+                              'grad_norm': float('inf'),
+                              'nested': [float('nan'), float('-inf')]})
+            record = json.loads(path.read_text(), parse_constant=lambda x: self.fail(x))
+            self.assertEqual(record, {'step': 180, 'loss': 0.8,
+                                      'grad_norm': 'inf', 'nested': ['nan', '-inf']})
+
     def test_resume_and_identity_and_lock(self):
         with tempfile.TemporaryDirectory() as d:
             run = Run(d, {'model': 'a'})

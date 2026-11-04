@@ -42,6 +42,7 @@ def train(
         micro_batch_size: int = 4,
         num_epochs: int = 3,
         learning_rate: float = 3e-4,
+        precision: str = "fp16",  # fp16, bf16, or fp32
         cutoff_len: int = 256,
         val_set_size: int = 2000,
         use_gradient_checkpointing: bool = False,
@@ -92,6 +93,12 @@ def train(
         raise ValueError("AdapterP requires --adapter_name bottleneck")
     if val_set_size > 0 and (eval_step <= 0 or save_step <= 0 or save_step % eval_step):
         raise ValueError("save_step must be a positive multiple of eval_step")
+    if precision not in ("fp16", "bf16", "fp32"):
+        raise ValueError("precision must be fp16, bf16, or fp32")
+    if precision == "bf16" and (not torch.cuda.is_available() or not torch.cuda.is_bf16_supported()):
+        raise ValueError("BF16 training requires a CUDA GPU with BF16 support")
+    model_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16,
+                   "fp32": torch.float32}[precision]
     run = Run(output_dir, settings, resume=bool(resume_from_checkpoint))
     if (Path(output_dir) / "status.json").exists():
         if json.loads((Path(output_dir) / "status.json").read_text()).get("state") == "complete":
@@ -175,7 +182,7 @@ def train(
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
             load_in_8bit=load_8bit,
-            torch_dtype=torch.float16,
+            torch_dtype=model_dtype,
             device_map=device_map,
             revision=model_revision,
         )
@@ -183,7 +190,7 @@ def train(
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
             load_in_8bit=False,
-            torch_dtype=torch.float16,
+            torch_dtype=model_dtype,
             device_map={"": int(os.environ.get("LOCAL_RANK") or 0)},
             revision=model_revision,
         )
@@ -391,7 +398,8 @@ def train(
             save_safetensors=False,
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
-            fp16=True,
+            fp16=precision == "fp16",
+            bf16=precision == "bf16",
             logging_steps=10,
             optim="adamw_torch",
             evaluation_strategy="steps" if val_set_size > 0 else "no",

@@ -3,6 +3,7 @@ import atexit
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -37,8 +38,18 @@ def atomic_json(path, data):
 
 
 def append_json(path, data):
+    # Keep nonfinite diagnostics visible while producing standards-compliant JSON.
+    def safe(value):
+        if isinstance(value, float) and not math.isfinite(value):
+            return str(value)
+        if isinstance(value, dict):
+            return {key: safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [safe(item) for item in value]
+        return value
+
     with Path(path).open('a') as f:
-        f.write(json.dumps(data, allow_nan=False, default=str) + '\n')
+        f.write(json.dumps(safe(data), allow_nan=False, default=str) + '\n')
         f.flush()
         os.fsync(f.fileno())
 

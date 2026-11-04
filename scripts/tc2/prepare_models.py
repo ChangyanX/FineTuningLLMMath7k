@@ -8,10 +8,14 @@ from huggingface_hub import HfApi, snapshot_download
 
 project = Path(sys.argv[1])
 api = HfApi()
-registry = project / 'models.json'
+extra = len(sys.argv) > 2 and sys.argv[2] == 'extra'
+registry = project / ('models-extra.json' if extra else 'models.json')
 models = {'OPENLLAMA_REVISION': 'openlm-research/open_llama_3b_v2',
           'TINYLLAMA_REVISION': 'TinyLlama/TinyLlama_v1.1'}
-run = Run(project / 'prepare', {'models': models}, resume=(project/'prepare/settings.json').exists())
+if extra:
+    models = {'TINYLLAMA_CHAT_REVISION': 'TinyLlama/TinyLlama-1.1B-Chat-v1.0'}
+prepare_dir = project / ('prepare-extra' if extra else 'prepare')
+run = Run(prepare_dir, {'models': models}, resume=(prepare_dir/'settings.json').exists())
 if registry.exists():
     revisions = json.loads(registry.read_text())
 else:
@@ -26,7 +30,8 @@ for variable, repo in models.items():
         (name.endswith('.safetensors') if use_safe else name.startswith('pytorch_model') and name.endswith('.bin')))]
     location = snapshot_download(repo, revision=revisions[variable], allow_patterns=selected)
     run.event('model_cached', model=repo, revision=revisions[variable], location=location)
-(project/'revisions.env').write_text(''.join(f'export {key}={value}\n' for key, value in revisions.items()))
+environment = project / ('revisions-extra.env' if extra else 'revisions.env')
+environment.write_text(''.join(f'export {key}={value}\n' for key, value in revisions.items()))
 run.status('complete', revisions=revisions)
 run.close()
-print((project/'revisions.env').read_text())
+print(environment.read_text())
