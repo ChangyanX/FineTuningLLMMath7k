@@ -9,6 +9,7 @@ This guide uses the existing `finetune.py` and `evaluate.py`, with focused persi
 | Access | NTU VPN off campus (`vpngate.ntu.edu.sg`), then SSH/SFTP `changyan003@10.96.189.12` |
 | Scheduler | SLURM; partition `MGPU-TC2`, QoS `normal` |
 | Request | 1 GPU, 4 CPUs, 24 GB **host RAM**, maximum 6 hours per job |
+| Account queue limit | **2 total jobs: at most 1 running + 1 queued**; further submissions are rejected |
 | GPU | Expect A40 48 GB from supplied evidence; confirm actual allocation |
 | Persistent project | `~/ai6130-ass2` (verify quota and compute-node accessibility) |
 | Frozen source | `~/ai6130-ass2/source-v1`; never upload changed code over an active experiment |
@@ -186,13 +187,13 @@ sbatch source-v1/scripts/tc2/job.sbatch eval M4 1 retry1 AddSub
 
 ```
 
-Do **not** paste the entire block as an unattended pipeline: plain `sbatch` returns immediately; it does not wait for training. An evaluation submitted too early fails if no final adapter exists. Alternatively add `--dependency=afterok:TRAIN_JOB_ID` to each dependent evaluation submission. Do not automatically chain retries on failure.
+Do **not** paste the entire block as an unattended pipeline: plain `sbatch` returns immediately; it does not wait for training. An evaluation submitted too early fails if no final adapter exists. A dependent job still occupies one of the two allowed slots; do not queue training plus two dependent evaluations. Use the combined actions below for new experiments. Do not automatically chain retries on failure.
 
 ### Optional baselines and epochs
 
 Untouched-base baselines (4 evaluations shared by both adapters):
 
-**You may paste all four commands below together** in the SSH/head-node terminal after `cd ~/ai6130-ass2` and successful model preparation. They have no training dependency and write to four distinct evaluation directories (`M1_baseline_main`/`M3_baseline_main`, each with AQuA/AddSub). SLURM queues/schedules them according to your account limits; submitting four jobs does not guarantee four simultaneous GPUs. If submission itself rejects an account/QoS job-count limit, record accepted IDs and submit only the rejected jobs later. Do not submit the same command twice to an existing output directory. Resume an interrupted baseline with `sbatch --export=ALL,RESUME=1 ... baseline ...` using the original source/settings.
+**Account limit: at most two jobs total (running + queued), with only one running at a time. Do not paste all four commands together.** Submit only when `squeue -u "$USER"` shows a free slot. If the queue is empty, you may submit the first two, then wait for both to finish successfully before the next pair. Dependent jobs count toward the same limit. The IDs below record earlier submissions; do not rerun completed evaluations. Resume an interrupted baseline with `sbatch --export=ALL,RESUME=1 ... baseline ...` using its original source/settings.
 
 These baselines support Task 3's before/after discussion; they are additional comparisons, not an explicitly listed Task 4 option.
 
@@ -207,6 +208,11 @@ sbatch source-v1/scripts/tc2/job.sbatch baseline M1 1 main AddSub
 # Submitted batch job 50174
 # tail -f runs/M1_baseline_main/eval/AddSub/evaluate_50174.log
 # sacct -j 50174 --format=JobID,JobName,State,ExitCode,Elapsed
+```
+
+Wait for the first pair to finish successfully before submitting the next pair:
+
+```bash
 sbatch source-v1/scripts/tc2/job.sbatch baseline M3 1 main AQuA
 # Submitted batch job 50375
 # tail -f runs/M3_baseline_main/eval/AQuA/evaluate_50375.log
@@ -217,17 +223,26 @@ sbatch source-v1/scripts/tc2/job.sbatch baseline M3 1 main AddSub
 # sacct -j 50377 --format=JobID,JobName,State,ExitCode,Elapsed
 ```
 
-For the optional 2-epoch comparison, repeat the twelve mandatory commands with epochs `2` instead of `1` (paths become `M1_e2_main`, etc.). This adds 4 training + 8 evaluations. It trains from the pinned base, not from the 1-epoch final adapter. Keep the tag/epoch pair consistent between training and evaluation.
+### Task 4: simple submissions within the two-job limit
 
-### Task 4: executable commands for all four options
+Use the existing **`scripts/tc2/job.sbatch`** for every option. The separate Task 4 launcher and preparation helper have been removed. New actions merge work **sequentially inside one GPU allocation**, without submitting child jobs:
 
-The original `job.sbatch` accepts only AQuA/AddSub, `math_7k` and M1-M4. The new **`scripts/tc2/task4.sbatch`** supports all six math benchmarks, `math_7k`/`math_10k`, and M5/M6 for an additional model. Leave the original frozen `source-v1` unchanged. The commands below prepare jobs; no Task 4 GPU runs have been performed or validated by this documentation update.
+| Action | Work inside one job |
+|---|---|
+| `train-eval` | Train, then AQuA, then AddSub. An explicit fifth argument selects only that benchmark. |
+| `train-eval-smoke` | Four training steps, then five examples each on AQuA/AddSub. Use a separate smoke tag. |
+| `eval-pair` | AQuA, then AddSub on an existing adapter. |
+| `baseline-pair` | AQuA, then AddSub on one untouched base model. |
 
-**Health gate (2 November audit):** [the downloaded-run audit](MANDATORY_RUN_AUDIT.md) found complete artifacts but unhealthy M3/M4 optimization and high AQuA parse failures. Establish a healthy profile before spending GPU time on epoch/data/model comparisons. Defaults below preserve the original FP16, cutoff 256, prompt+response loss settings so the extension changes the named factor. They do not fix those issues. If using BF16 or another repair, apply that same profile to fresh 1-epoch controls and all comparison runs, use distinct tags, and report every changed setting. Never resume an FP16 run as BF16.
+For `math_10k`, a default pair is AQuA/SVAMP instead. The original `train`, `eval`, `baseline`, `summary`, `export` and resume commands still work. A combined job stops if any stage fails or is interrupted. All stages share the **same six-hour wall limit**, not six hours each. Keep larger benchmarks separate. Grouped jobs create the same per-run/per-benchmark files as individual jobs and share a SLURM job ID.
 
-#### Upload the new frozen source once
+**Submission rule for every block below:** first run `squeue -u "$USER"`. Paste a two-command block only when your queue is empty. Wait for **both jobs to leave the queue and verify their successful completion** before the next block. If one job is already running/queued, submit at most one more. Do not paste multiple blocks together or add dependency submissions.
 
-On the Mac (VPN connected):
+[The mandatory-run audit](MANDATORY_RUN_AUDIT.md) found numerical problems in M3/M4. These commands retain the original FP16/256-token training settings; they do not repair those runs. Validate a repaired profile before expanding unhealthy experiments, and use fresh control runs/tags if settings change.
+
+#### Upload the updated launcher once
+
+On the Mac, upload a new frozen source rather than overwriting active `source-v1` experiments:
 
 ```bash
 cd '/Users/changyanxu/Documents/NTU/AI6130 - LLM/Assignment2/FineTuningLLMMath7k'
@@ -235,142 +250,228 @@ rsync -av --exclude='.git/' --exclude='.venv/' --exclude='__pycache__/' \
   --exclude='.env*' --exclude='runs/' --exclude='trained_models/' \
   --exclude='cache/' --exclude='exports/' --exclude='summary/' \
   --exclude='logs/' --exclude='*.egg-info/' \
-  ./ changyan003@10.96.189.12:~/ai6130-ass2/source-task4-v1/
+  ./ changyan003@10.96.189.12:~/ai6130-ass2/source-options-v1/
 ssh changyan003@10.96.189.12
 ```
 
-Then on the school head node:
+On the school head node, once per SSH session:
 
 ```bash
 cd ~/ai6130-ass2
-mkdir -p logs
-# Defaults for the original experimental profile, explicitly inherited by sbatch:
-export PRECISION=fp16 CUTOFF=256 TRAIN_ON_INPUTS=True
-# Prevent a prior interactive SOURCE_DIR override from selecting a different tree:
-export SOURCE_DIR="$HOME/ai6130-ass2/source-task4-v1"
-```
-
-The launcher uses the existing environment, model cache and `revisions.env`; it does not reinstall packages or alter old runs. Keep this source immutable after submitting jobs. Its argument order is:
-
-```text
-task4.sbatch ACTION RUN TOTAL_EPOCHS TAG BENCHMARK TRAIN_SET
-```
-
-`BENCHMARK` is ignored for training. `TRAIN_SET` is `math_7k` or `math_10k`. For evaluation it must match the actual training record. Training/evaluation resume uses `--export=ALL,RESUME=1` with otherwise identical arguments, source and environment. Ensure `RESUME` is unset for fresh experiments:
-
-```bash
+export SOURCE_DIR="$HOME/ai6130-ass2/source-options-v1"
 unset RESUME
+squeue -u "$USER"
 ```
 
-The blocks below use Bash loops; run `bash` first if your login shell is not Bash. They can be pasted as complete blocks: training submissions use `--parsable` and each evaluation has an `afterok` dependency. A training failure leaves its dependent evaluations pending; inspect the failure and cancel those dependent jobs before submitting a fresh tagged attempt. An accepted submission is not proof of successful execution.
+Keep this source unchanged after submission. These jobs reuse the existing environment/cache/model pins; do not repeat setup. The optional sixth argument selects `math_7k` (default) or `math_10k`.
 
-#### Option 1: epochs 2 and 3
+#### Optional: merge two baseline evaluations into one job
 
-This submits **8 trainings + 16 evaluations** for both epoch counts (4 + 8 for each count). To run only 2 epochs, change `for epochs in 2 3` to `for epochs in 2`.
+Only for baselines **not already submitted/completed**; the baseline IDs above already record all four submissions. Do not duplicate them. If starting fresh with no other queued jobs:
 
 ```bash
-(
-set -euo pipefail
-for epochs in 2 3; do
-  for run in M1 M2 M3 M4; do
-    jid=$(sbatch --parsable source-task4-v1/scripts/tc2/task4.sbatch train "$run" "$epochs" epochs_v1 AQuA math_7k)
-    jid=${jid%%;*}
-    echo "$run epochs=$epochs train=$jid"
-    sbatch --dependency="afterok:$jid" source-task4-v1/scripts/tc2/task4.sbatch eval "$run" "$epochs" epochs_v1 AQuA math_7k
-    sbatch --dependency="afterok:$jid" source-task4-v1/scripts/tc2/task4.sbatch eval "$run" "$epochs" epochs_v1 AddSub math_7k
-  done
-done
-)
+sbatch source-options-v1/scripts/tc2/job.sbatch baseline-pair M1 1 main
+sbatch source-options-v1/scripts/tc2/job.sbatch baseline-pair M3 1 main
 ```
 
-Each trains from the pinned base to the stated total epochs. The exported final adapter is still the **best validation checkpoint** and may precede the final epoch. Record its selected step/epoch; do not label it an exact epoch-end snapshot.
+This is two allocations for four evaluations. To resume previously started baselines, use their original source and individual baseline-resume commands instead.
 
-#### Option 2: other fine-tuning data, `math_10k.json`
+#### Option 1: more epochs
 
-The repository warns that `math_10k` includes MAWPS problems. Local normalized-question checks find 331 AddSub, 569 MultiArith and 449 SingleEq test questions in that training file. **Do not evaluate this setting on those three benchmarks.** Use AQuA and SVAMP: the same local check found zero exact normalized-question overlaps for these two. This is a duplicate check, not proof of complete semantic separation. `math_10k.json` actually contains 9,919 records (9,799 train + 120 validation with this split).
-
-This submits **4 trainings + 8 evaluations**:
+Each command combines one training run and two evaluations. Two epochs: **4 jobs**, submitted in two pairs.
 
 ```bash
-(
-set -euo pipefail
-for run in M1 M2 M3 M4; do
-  jid=$(sbatch --parsable source-task4-v1/scripts/tc2/task4.sbatch train "$run" 1 math10k_v1 AQuA math_10k)
-  jid=${jid%%;*}
-  echo "$run math_10k train=$jid"
-  sbatch --dependency="afterok:$jid" source-task4-v1/scripts/tc2/task4.sbatch eval "$run" 1 math10k_v1 AQuA math_10k
-  sbatch --dependency="afterok:$jid" source-task4-v1/scripts/tc2/task4.sbatch eval "$run" 1 math10k_v1 SVAMP math_10k
-done
-)
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M1 2 epochs
+# Submitted batch job 50414
+# tail -n 100 runs/M1_e2_epochs/train_50414.log
+# tail -f runs/M1_e2_epochs/eval/AQuA/evaluate_50414.log
+# tail -f runs/M1_e2_epochs/eval/AddSub/evaluate_50414.log
+# sacct -j 50414 --format=JobID,JobName,State,ExitCode,Elapsed
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M2 2 epochs
+# Submitted batch job 50416
+# tail -n 100 runs/M2_e2_epochs/train_50416.log
+# tail -f runs/M2_e2_epochs/eval/AQuA/evaluate_50416.log
+# tail -f runs/M2_e2_epochs/eval/AddSub/evaluate_50416.log
+# sacct -j 50416 --format=JobID,JobName,State,ExitCode,Elapsed
 ```
 
-For a dataset comparison, use AQuA and SVAMP for **both** training datasets. Obtain SVAMP results for the original `math_7k` adapters using Option 4 below. If using a repaired training profile, train/evaluate fresh `math_7k` controls under that profile too.
+Wait for both to finish successfully, then:
+
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M3 2 epochs
+# Submitted batch job 50485
+# tail -n 100 runs/M3_e2_epochs/train_50485.log
+# tail -f runs/M3_e2_epochs/eval/AQuA/evaluate_50485.log
+# tail -f runs/M3_e2_epochs/eval/AddSub/evaluate_50485.log
+# sacct -j 50485 --format=JobID,JobName,State,ExitCode,Elapsed
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M4 2 epochs
+# Submitted batch job 50529
+# tail -n 100 runs/M4_e2_epochs/train_50529.log
+# tail -f runs/M4_e2_epochs/eval/AQuA/evaluate_50529.log
+# tail -f runs/M4_e2_epochs/eval/AddSub/evaluate_50529.log
+# sacct -j 50529 --format=JobID,JobName,State,ExitCode,Elapsed
+```
+
+Optional three-epoch comparison, again one pair at a time:
+
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M1 3 epochs
+# Submitted batch job 50530
+# tail -n 100 runs/M1_e3_epochs/train_50530.log
+# tail -f runs/M1_e3_epochs/eval/AQuA/evaluate_50530.log
+# tail -f runs/M1_e3_epochs/eval/AddSub/evaluate_50530.log
+# sacct -j 50530 --format=JobID,JobName,State,ExitCode,Elapsed
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M2 3 epochs
+# Submitted batch job 50571
+# tail -n 100 runs/M2_e3_epochs/train_50571.log
+# tail -f runs/M2_e3_epochs/eval/AQuA/evaluate_50571.log
+# tail -f runs/M2_e3_epochs/eval/AddSub/evaluate_50571.log
+# sacct -j 50571 --format=JobID,JobName,State,ExitCode,Elapsed
+```
+
+Wait for both, then:
+
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M3 3 epochs
+# Submitted batch job 50655
+# tail -n 100 runs/M3_e3_epochs/train_50655.log
+# tail -f runs/M3_e3_epochs/eval/AQuA/evaluate_50655.log
+# tail -f runs/M3_e3_epochs/eval/AddSub/evaluate_50655.log
+# sacct -j 50655 --format=JobID,JobName,State,ExitCode,Elapsed
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M4 3 epochs
+# Submitted batch job 50743
+# Submitted batch job 50743
+# tail -n 100 runs/M4_e3_epochs/train_50743.log
+# tail -f runs/M4_e3_epochs/eval/AQuA/evaluate_50743.log
+# tail -f runs/M4_e3_epochs/eval/AddSub/evaluate_50743.log
+# sacct -j 50743 --format=JobID,JobName,State,ExitCode,Elapsed
+```
+
+These train independently from the pinned base, not from the one-epoch adapter. Output paths include epoch and tag, e.g. `runs/M1_e2_epochs`. Final adapters still come from the best validation checkpoint; report its selected step rather than assuming an epoch-end snapshot.
+
+#### Option 2: other training data, `math_10k.json`
+
+`math_10k` contains 9,919 examples (9,799 train + 120 validation). It overlaps AddSub/MultiArith/SingleEq; do not use those benchmarks for this setting. Use AQuA and SVAMP. Local normalized-question checks found no exact duplicates for these two, which does not guarantee complete semantic separation.
+
+Merge training and **AQuA only**; keep the larger SVAMP evaluation separate. This needs **8 jobs** total, submitted two at a time:
+
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M1 1 math10k AQuA math_10k
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M2 1 math10k AQuA math_10k
+```
+
+Wait for both, then:
+
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M3 1 math10k AQuA math_10k
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M4 1 math10k AQuA math_10k
+```
+
+Wait for both, then:
+
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M1 1 math10k SVAMP math_10k
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M2 1 math10k SVAMP math_10k
+```
+
+Wait for both, then:
+
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M3 1 math10k SVAMP math_10k
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M4 1 math10k SVAMP math_10k
+```
+
+For a dataset comparison, evaluate the original `math_7k` adapters on SVAMP too (Option 4).
 
 #### Option 3: another LLM
 
-Concrete additional model: **`TinyLlama/TinyLlama-1.1B-Chat-v1.0`**, with M5 = LoRA and M6 = AdapterP. Its [official model card](https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0) describes a Llama-compatible chat model and Transformers >=4.34, compatible in principle with this project's 4.38 environment. It is a distinct checkpoint, not a new architecture/size. This experiment keeps the existing assignment prompt format for control; it does not use the model's native chat template, which is a limitation to report. Custom AdapterP compatibility and numerical health still require a GPU smoke check.
+M5 = LoRA and M6 = AdapterP on **`TinyLlama/TinyLlama-1.1B-Chat-v1.0`**. This is a distinct chat checkpoint with the same architecture/size family. The [official model card](https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0) describes Llama compatibility. The experiment retains the assignment's prompt format rather than its native chat template; report that limitation. GPU/custom AdapterP compatibility remains to be checked.
 
-First pin and cache the model **on compute**:
+First submit **one preparation job**, then wait for success:
 
 ```bash
-sbatch source-task4-v1/scripts/tc2/task4.sbatch prepare-extra
+sbatch source-options-v1/scripts/tc2/job.sbatch prepare-extra
 ```
 
-Wait for successful completion and inspect `task4_model.json`. It records the immutable model SHA; reruns reuse it. Then test both methods (5-example evaluations are separate from full results):
+It pins/downloads the extra model on compute, saving `models-extra.json` and `revisions-extra.env`; existing mandatory model pins remain intact. Then smoke-test both methods in **two jobs**:
 
 ```bash
-(
-set -euo pipefail
-for run in M5 M6; do
-  jid=$(sbatch --parsable source-task4-v1/scripts/tc2/task4.sbatch train-smoke "$run" 1 chat_smoke01 AQuA math_7k)
-  jid=${jid%%;*}
-  echo "$run smoke train=$jid"
-  sbatch --dependency="afterok:$jid" source-task4-v1/scripts/tc2/task4.sbatch eval-smoke "$run" 1 chat_smoke01 AQuA math_7k
-  sbatch --dependency="afterok:$jid" source-task4-v1/scripts/tc2/task4.sbatch eval-smoke "$run" 1 chat_smoke01 AddSub math_7k
-done
-)
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval-smoke M5 1 chat_smoke01
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval-smoke M6 1 chat_smoke01
 ```
 
-Only after checking gradients, adapter saves/loads and generations, submit **2 full trainings + 4 evaluations**:
+Wait for both and inspect gradients, adapter reloads and generations. Only after successful checks, submit **two full jobs**:
 
 ```bash
-(
-set -euo pipefail
-for run in M5 M6; do
-  jid=$(sbatch --parsable source-task4-v1/scripts/tc2/task4.sbatch train "$run" 1 chat_v1 AQuA math_7k)
-  jid=${jid%%;*}
-  echo "$run full train=$jid"
-  sbatch --dependency="afterok:$jid" source-task4-v1/scripts/tc2/task4.sbatch eval "$run" 1 chat_v1 AQuA math_7k
-  sbatch --dependency="afterok:$jid" source-task4-v1/scripts/tc2/task4.sbatch eval "$run" 1 chat_v1 AddSub math_7k
-done
-)
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M5 1 chat
+sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M6 1 chat
 ```
 
 #### Option 4: more benchmarks on the selected mandatory adapters
 
-These **16 independent evaluations** reuse M1 retry2, M2 main, M3 main and M4 retry1; no retraining is needed. The adapters must still exist remotely at their original paths. All jobs can be queued together because each writes to a distinct benchmark directory. The M3/M4 results retain the health caveats from the audit.
+These reuse M1 retry2, M2 main, M3 main and M4 retry1. No retraining is needed. Keep each larger benchmark in its own job; the full 16 evaluations can exceed six hours if grouped. **Wait for both jobs after every block**:
 
 ```bash
-(
-set -euo pipefail
-for benchmark in MultiArith SingleEq gsm8k SVAMP; do
-  sbatch source-task4-v1/scripts/tc2/task4.sbatch eval M1 1 retry2 "$benchmark" math_7k
-  sbatch source-task4-v1/scripts/tc2/task4.sbatch eval M2 1 main "$benchmark" math_7k
-  sbatch source-task4-v1/scripts/tc2/task4.sbatch eval M3 1 main "$benchmark" math_7k
-  sbatch source-task4-v1/scripts/tc2/task4.sbatch eval M4 1 retry1 "$benchmark" math_7k
-done
-)
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M1 1 retry2 MultiArith
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M2 1 main MultiArith
 ```
-
-Expected full test counts are MultiArith **600**, SingleEq **508**, gsm8k **1,319**, SVAMP **1,000**. Larger benchmarks may require evaluation resume after the six-hour limit. The updated summary script supports all six math benchmarks; run it on compute only after full evaluations finish:
 
 ```bash
-sbatch source-task4-v1/scripts/tc2/task4.sbatch summary
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M3 1 main MultiArith
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M4 1 retry1 MultiArith
 ```
 
-The CSV includes every complete full-benchmark run; filter by exact run IDs/tags for each report. It does not certify training health. M5/M6 and new optional source exports are not accepted by the original export launcher's M1-M4 validation; archive their stopped run directories with `source-task4-v1`, `task4_model.json`, environment snapshot and logs separately. Preserve checksums, and do not modify old exports.
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M1 1 retry2 SingleEq
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M2 1 main SingleEq
+```
 
-Local validation of this extension (2 November 2026): **5 targeted tests passed**, covering summary integrity, the additional numeric benchmark, launcher argument routing, model pins, dataset mismatch/overlap refusal and compute guards. All 10 new Bash blocks pass syntax checks; mocked submission loops produce the expected 64 jobs and 32 training dependencies when every displayed option (including chat smoke tests and both epoch counts) is selected. Python syntax checks pass. These tests do not validate GPU memory, numerical health, actual SLURM submissions or the extra model's custom AdapterP path on school hardware.
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M3 1 main SingleEq
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M4 1 retry1 SingleEq
+```
+
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M1 1 retry2 gsm8k
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M2 1 main gsm8k
+```
+
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M3 1 main gsm8k
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M4 1 retry1 gsm8k
+```
+
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M1 1 retry2 SVAMP
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M2 1 main SVAMP
+```
+
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M3 1 main SVAMP
+sbatch source-options-v1/scripts/tc2/job.sbatch eval M4 1 retry1 SVAMP
+```
+
+Expected counts: MultiArith 600, SingleEq 508, gsm8k 1,319, SVAMP 1,000. If a single evaluation exceeds six hours, resume that evaluation using its original source/settings.
+
+#### Resume a combined job and summarize
+
+After an interruption, inspect statuses/logs. With the **same source, model/data/settings/tag**, resubmit the same combined command with `RESUME=1`:
+
+```bash
+sbatch --export=ALL,RESUME=1 source-options-v1/scripts/tc2/job.sbatch train-eval M1 2 epochs
+```
+
+A completed training stage is skipped. Existing evaluation stages use evaluator resume; stages without saved settings start fresh. A failed stage stops the combined job. Do not queue a resume while the original job is still active, and do not resume through a settings mismatch/corruption error.
+
+When all intended evaluations finish and a slot is free:
+
+```bash
+sbatch source-options-v1/scripts/tc2/job.sbatch summary
+```
+
+This writes `summary/results.csv` for all complete full benchmarks. Filter exact run IDs for the report. The existing `export` action also accepts M5/M6 in the updated launcher. Download `models-extra.json` and `revisions-extra.env` separately with any extra-model exports. No school jobs were submitted by this edit.
+
+Local checks passed for grouped stage order, stopping after failure, per-stage resume, signal forwarding, dataset-overlap rejection, baseline pairing and extra-model smoke argument routing. All command blocks parse as Bash and contain at most two submissions. These are offline checks, not a validation of GPU runtime or scientific quality.
 
 ## 6. Saved outputs and recovery
 
