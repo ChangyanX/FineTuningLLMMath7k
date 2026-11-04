@@ -356,56 +356,73 @@ These train independently from the pinned base, not from the one-epoch adapter. 
 
 `math_10k` contains 9,919 examples (9,799 train + 120 validation). It overlaps AddSub/MultiArith/SingleEq; do not use those benchmarks for this setting. Use AQuA and SVAMP. Local normalized-question checks found no exact duplicates for these two, which does not guarantee complete semantic separation.
 
-Merge training and **AQuA only**; keep the larger SVAMP evaluation separate. This needs **8 jobs** total, submitted two at a time:
+Recovery note (4 November 2026): the saved settings for all four original `runs/M[1-4]_e1_math10k` runs record `./ft-training_set/math_7k.json`. These are math7k-trained adapters despite their tags; exclude them from math10k results. Preserve those folders and their metadata. Rerun all four math10k training runs and their AQuA/SVAMP evaluations with the fresh `math10k_fix1` tag. This does not require rerunning the mandatory math7k or epoch experiments, deleting folders, uploading replacement files, reinstalling the environment, or downloading models again.
+
+Explicitly select the options source in every new SSH session. Submitting a script from `source-options-v1` does not set `SOURCE_DIR`: both launchers default to `source-v1`, whose older training command hardcodes math7k. The options launcher must also use the options source for its child stages.
 
 ```bash
-sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M1 1 math10k AQuA math_10k
-# Submitted batch job 50862
-# tail -n 100 runs/M1_e1_math10k/train_50862.log
-# tail -f runs/M1_e1_math10k/eval/AQuA/evaluate_50862.log
-# sacct -j 50862 --format=JobID,JobName,State,ExitCode,Elapsed
-sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M2 1 math10k AQuA math_10k
-# Submitted batch job 50863
-# tail -n 100 runs/M2_e1_math10k/train_50863.log
-# tail -f runs/M2_e1_math10k/eval/AQuA/evaluate_50863.log
-# sacct -j 50863 --format=JobID,JobName,State,ExitCode,Elapsed
+cd ~/ai6130-ass2
+export SOURCE_DIR="$HOME/ai6130-ass2/source-options-v1"
+unset RESUME
+ls -lh "$SOURCE_DIR/ft-training_set/math_10k.json"
+squeue -u "$USER"
 ```
 
-Wait for both, then:
+Use **four combined jobs**, one per model/method. Each runs training → AQuA → SVAMP sequentially in one allocation; `both math_10k` selects those two benchmarks automatically. All three stages share the six-hour wall limit. A failed stage stops the job. Do not also submit separate training/evaluation jobs against the same run directory.
+
+Submit the first pair only when queue slots are available (at most one running plus one queued):
 
 ```bash
-sbatch source-options-v1/scripts/tc2/job.sbatch train-eval M3 1 math10k AQuA math_10k
-# Submitted batch job 50887
-# tail -n 100 runs/M3_e1_math10k/train_50887.log
-# tail -f runs/M3_e1_math10k/eval/AQuA/evaluate_50887.log
-# sacct -j 50887 --format=JobID,JobName,State,ExitCode,Elapsed
+sbatch "$SOURCE_DIR/scripts/tc2/job.sbatch" train-eval M1 1 math10k_fix1 both math_10k
+# Submitted batch job 50996
+job_id=50996
+sacct -j "$job_id" --format=JobID,JobName,State,ExitCode,Elapsed
+tail -n 100 "runs/M1_e1_math10k_fix1/train_${job_id}.log"
+tail -f "runs/M1_e1_math10k_fix1/eval/AQuA/evaluate_${job_id}.log"
+tail -f "runs/M1_e1_math10k_fix1/eval/SVAMP/evaluate_${job_id}.log"
 
-sbatch --job-name=M4-math10k source-options-v1/scripts/tc2/job.sbatch train-eval M4 1 math10k AQuA math_10k
-# Submitted batch job 50947
-# tail -n 100 runs/M4_e1_math10k/train_50947.log
-# tail -f runs/M4_e1_math10k/eval/AQuA/evaluate_50947.log
-# sacct -j 50947 --format=JobID,JobName,State,ExitCode,Elapsed
+sbatch "$SOURCE_DIR/scripts/tc2/job.sbatch" train-eval M2 1 math10k_fix1 both math_10k
+# Submitted batch job 51003
+job_id=51003
+sacct -j "$job_id" --format=JobID,JobName,State,ExitCode,Elapsed
+tail -n 100 "runs/M2_e1_math10k_fix1/train_${job_id}.log"
+tail -f "runs/M2_e1_math10k_fix1/eval/AQuA/evaluate_${job_id}.log"
+tail -f "runs/M2_e1_math10k_fix1/eval/SVAMP/evaluate_${job_id}.log"
 ```
 
-Wait for both, then:
+Once each training stage starts and its settings file exists, inspect it. It must record `./ft-training_set/math_10k.json`; do not edit metadata to bypass a mismatch:
 
 ```bash
-sbatch source-options-v1/scripts/tc2/job.sbatch eval M1 1 math10k SVAMP math_10k
-# Submitted batch job 50948
-# Submitted batch job 50975
-# tail -f runs/M1_e1_math10k/eval/SVAMP/evaluate_50975.log
-# sacct -j 50975 --format=JobID,JobName,State,ExitCode,Elapsed
-sbatch source-options-v1/scripts/tc2/job.sbatch eval M2 1 math10k SVAMP math_10k
-# tail -f runs/M2_e1_math10k/eval/SVAMP/evaluate_50975.log
-# sacct -j 50975 --format=JobID,JobName,State,ExitCode,Elapsed
+grep '"data_path"' runs/M1_e1_math10k_fix1/settings.json
+grep '"data_path"' runs/M2_e1_math10k_fix1/settings.json
 ```
 
-Wait for both, then:
+Wait for both combined jobs to finish successfully, then submit the second pair:
 
 ```bash
-sbatch --job-name=M3-math10k source-options-v1/scripts/tc2/job.sbatch eval M3 1 math10k SVAMP math_10k
-sbatch --job-name=M4-math10k source-options-v1/scripts/tc2/job.sbatch eval M4 1 math10k SVAMP math_10k
+sbatch "$SOURCE_DIR/scripts/tc2/job.sbatch" train-eval M3 1 math10k_fix1 both math_10k
+sbatch "$SOURCE_DIR/scripts/tc2/job.sbatch" train-eval M4 1 math10k_fix1 both math_10k
 ```
+
+Verify the M3/M4 saved training datasets in the same way. Record the actual job IDs returned by `sbatch`; previous IDs refer to the original attempts. For M1, substitute its new job ID below (repeat with the corresponding run and ID for M2–M4):
+
+```bash
+job_id=REPLACE_WITH_NEW_JOB_ID
+sacct -j "$job_id" --format=JobID,JobName,State,ExitCode,Elapsed
+tail -n 100 "runs/M1_e1_math10k_fix1/train_${job_id}.log"
+# Each evaluation log appears when that stage begins:
+tail -f "runs/M1_e1_math10k_fix1/eval/AQuA/evaluate_${job_id}.log"
+tail -f "runs/M1_e1_math10k_fix1/eval/SVAMP/evaluate_${job_id}.log"
+```
+
+After completion, inspect `status.json` in the run root and both evaluation directories, and confirm successful SLURM accounting. If interrupted or timed out, wait until the job has stopped, inspect the failure, then resume the same combined job with the same source/settings/tag:
+
+```bash
+sbatch --export=ALL,RESUME=1 "$SOURCE_DIR/scripts/tc2/job.sbatch" \
+  train-eval M1 1 math10k_fix1 both math_10k
+```
+
+Completed training is skipped and evaluations resume as described below. Do not resume the old math7k-trained `math10k` runs as math10k experiments.
 
 For a dataset comparison, evaluate the original `math_7k` adapters on SVAMP too (Option 4).
 
